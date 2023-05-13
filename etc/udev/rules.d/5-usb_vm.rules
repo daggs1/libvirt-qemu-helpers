@@ -1,0 +1,2 @@
+ACTION=="add", SUBSYSTEM=="usb", RUN="/usr/local/bin/handle_udev_usb_hp"
+ACTION=="remove", SUBSYSTEM=="usb", RUN="/usr/local/bin/handle_udev_usb_hp"

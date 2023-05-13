@@ -1,5 +1,12 @@
 #!/bin/bash
 
+function get_pt_usb_hubs_files {
+	local GST_NAME="$1"
+	local STATE_PATH="$2"
+
+	echo "pt_usb_hubs_tmp_file_path=\"/tmp/pt_usb_hubs-${GST_NAME}\" pt_usb_hubs_file_path=\"${STATE_PATH}/pt_usb_hubs\""
+}
+
 function get_seat_devs_files {
 	local GST_NAME="$1"
 	local STATE_PATH="$2"
@@ -18,35 +25,48 @@ function init_base_vars {
 	local EXEC_USER=$(ps -o user= -p ${curr_pid} 2>/dev/null)
 	local VM_XML_FILE_PATH=
 	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
+	eval $(get_pt_usb_hubs_files ${GST_NAME} ${STATE_PATH})
+
 	local curr_seat_devs_file_path=${seat_devs_tmp_file_path}
+	local curr_pt_usb_hubs_file_path=${pt_usb_hubs_tmp_file_path}
 
 	if [ ! -f "${curr_seat_devs_file_path}" ]; then
 		curr_seat_devs_file_path=${seat_devs_file_path}
 	fi
 
+	if [ ! -f "${curr_pt_usb_hubs_file_path}" ]; then
+		curr_pt_usb_hubs_file_path=${pt_usb_hubs_file_path}
+	fi
+
 	local SEAT_DEVS=$(cat ${curr_seat_devs_file_path} 2>/dev/null)
-	local cmd
+	local USB_PT_DATA=$(cat ${curr_pt_usb_hubs_file_path} 2>/dev/null)
+	local VM_PCIE_PT_BFDS=
 
-	if [ "${STATE}" = "init" -a "${STAGE}" = "none" ]; then
-		VM_XML_FILE_PATH=-
-		cmd="virsh --connect qemu:///system dumpxml ${GST_NAME}"
-	else
-		local xmls_path="$(realpath ${CFG_PATH}/../../qemu)"
-		OIFS=${IFS}
-		IFS=$'\n'
+	if [ "${STATE}" != "running" -a "${STAGE}" != "usb_pre_hotplug_scan" ]; then
+		local SEAT_DEVS=$(cat ${curr_seat_devs_file_path} 2>/dev/null)
+		local cmd
 
-		for xml_file_path in $(find ${xmls_path} -name "*.xml" -type f); do
-			xmllint --xpath "//domain/name/text()" ${xml_file_path} 2>/dev/null | egrep -q "^${GST_NAME}$" || continue
-			VM_XML_FILE_PATH=${xml_file_path}
-			break
-		done
+		if [ "${STATE}" = "init" -a "${STAGE}" = "none" ]; then
+			VM_XML_FILE_PATH=-
+			cmd="virsh --connect qemu:///system dumpxml ${GST_NAME}"
+		else
+			local xmls_path="$(realpath ${CFG_PATH}/../../qemu)"
+			OIFS=${IFS}
+			IFS=$'\n'
 
-		OIFS=${OIFS}
-		cmd="cat ${VM_XML_FILE_PATH}"
+			for xml_file_path in $(find ${xmls_path} -name "*.xml" -type f); do
+				xmllint --xpath "//domain/name/text()" ${xml_file_path} 2>/dev/null | egrep -q "^${GST_NAME}$" || continue
+				VM_XML_FILE_PATH=${xml_file_path}
+				break
+			done
+
+			OIFS=${OIFS}
+			cmd="cat ${VM_XML_FILE_PATH}"
+		fi
 	fi
 
 	local VM_PCIE_PT_BFDS=$(eval ${cmd} | gather_pcie_pt_bdfs)
-	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS}; do
+	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS,USB_PT_DATA}; do
 		echo "${var}=$(eval echo \${${var}})"
 	done
 }
@@ -66,9 +86,14 @@ function prep_state {
 	mount -t tmpfs -o size=4K tmpfs ${STATE_PATH}
 
 	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
+	eval $(get_pt_usb_hubs_files ${GST_NAME} ${STATE_PATH})
 
 	if [ ! -f "${seat_devs_file_path}" -a -f "${seat_devs_tmp_file_path}" ]; then
 		mv ${seat_devs_tmp_file_path} ${seat_devs_file_path}
+	fi
+
+	if [ ! -f "${pt_usb_hubs_file_path}" -a -f "${pt_usb_hubs_tmp_file_path}" ]; then
+		mv ${pt_usb_hubs_tmp_file_path} ${pt_usb_hubs_file_path}
 	fi
 }
 
@@ -225,6 +250,7 @@ vm_name=$1
 case $(basename $0) in
 	start_vm)
 		eval $(get_seat_devs_files ${vm_name} /dev/null)
+		eval $(get_pt_usb_hubs_files ${vm_name} /dev/null)
 
 		for module in {tun,kvm_amd,vhost_net}; do
 			sudo modprobe ${module} || exit $?
@@ -234,6 +260,7 @@ case $(basename $0) in
 		virsh_params="--connect qemu:///system -d 4"
 
 		loginctl seat-status | egrep "(MASTER|Keyboard|Mouse)" | egrep -v "Control" | cut -f 2 -d : | awk '{print $1}' | tr '\n' ',' | sed 's/,$//g' > ${seat_devs_tmp_file_path}
+		echo "${PT_USB_HUBS}" > ${pt_usb_hubs_tmp_file_path}
 
 		export $(init_base_vars ${vm_name} init none)
 		cmd="bash"
@@ -243,5 +270,49 @@ case $(basename $0) in
 		fi
 
 		echo "virsh ${virsh_params} start ${vm_name}" | ${cmd}
+	;;
+
+	handle_udev_usb_hp)
+		bus_num=$(echo "${BUSNUM}" | sed "s/^0\+//g")
+		dev_num=$(echo "${DEVNUM}" | sed "s/^0\+//g")
+
+		for vm_name in $(virsh --connect qemu:///system list | egrep " running$" | awk '{print $2}'); do
+			export $(init_base_vars ${vm_name} init none)
+			matched=0
+
+			OIFS=${IFS}
+			IFS=","
+
+			for hub in ${USB_PT_DATA}; do
+				echo "${DEVPATH}" | egrep -q "/${hub}/" || continue
+				if [ ! -z "${bus_num}" -o ! -z "${dev_num}" ]; then
+					matched=1
+					if [ "${ACTION}" = "add" ]; then
+						virsh --connect qemu:///system attach-device ${vm_name} /dev/stdin << VIRSHEOS
+							<hostdev mode='subsystem' type='usb'>
+								<source>
+									<address type='usb' bus='${bus_num}' device='${dev_num}'/>
+								</source>
+							</hostdev>
+VIRSHEOS
+					elif [ "${ACTION}" = "remove" ]; then
+						virsh --connect qemu:///system detach-device ${vm_name} /dev/stdin << VIRSHEOS
+							<hostdev mode='subsystem' type='usb'>
+								<source>
+									<address type='usb' bus='${bus_num}' device='${dev_num}'/>
+								</source>
+							</hostdev>
+VIRSHEOS
+					else
+						matched=0
+					fi
+				fi
+			done
+			IFS=${OIFS}
+
+			if [ ${matched} -eq 1 ]; then
+				break
+			fi
+		done
 	;;
 esac
