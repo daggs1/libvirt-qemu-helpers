@@ -1,1 +1,23 @@
-#/bin/bash
+#!/bin/bash
+
+utils_script=$(which vm_utils.sh)
+. ${utils_script}
+
+export $(init_base_vars $*)
+init_log
+
+for func in $(grep "^function " ${utils_script} | awk '{print $2}'); do
+	export -f ${func}
+done
+
+hook_path="${CFG_PATH}/${GST_NAME}/${STATE}.${STAGE}"
+if [ -f "${hook_path}" ]; then
+	exec_cmd="/$(grep '^#![[:blank:]]*/bin/' ${hook_path} | cut -f 2- -d /)"
+	exec_script=$(echo ${exec_cmd} | awk '{print $1}')
+
+	if [ -f "${exec_script}" -a -x "${exec_script}" ]; then
+		set -e
+		echo "Executing ${STATE}=>${STAGE}"
+		${exec_cmd} ${hook_path}
+	fi
+fi
