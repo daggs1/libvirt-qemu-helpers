@@ -25,3 +25,11 @@ function init_log {
 	echo "log started at $(date)"
 }
 
+function prep_state {
+	mkdir -p ${STATE_PATH}
+	mount -t tmpfs -o size=4K tmpfs ${STATE_PATH}
+}
+
+function release_state {
+	umount ${STATE_PATH}
+}
