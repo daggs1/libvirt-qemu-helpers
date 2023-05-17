@@ -10,7 +10,10 @@ function init_base_vars {
 	local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
 	local EXEC_USER=$(ps -o user= -p ${curr_pid})
 	local VM_XML_FILE_PATH=
+	local seat_devs_file_path="/tmp/seat_devs-${GST_NAME}"
+	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
 
+	rm -rf ${seat_devs_file_path} 2>/dev/null
 	local xmls_path="${CFG_PATH}/../../qemu"
 	OIFS=${IFS}
 	IFS=$'\n'
@@ -24,7 +27,7 @@ function init_base_vars {
 	OIFS=${OIFS}
 
 	local VM_PCIE_PT_BFDS=$(export VM_PCIE_PT_BFDS; gather_pcie_pt_bdfs)
-	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS}; do
+	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS}; do
 		echo "${var}=$(eval echo \${${var}})"
 	done
 }
