@@ -93,3 +93,29 @@ function create_input_events_links {
 		ln -s /dev/input/${event_fd} ${xml_input_path}
 	done
 }
+
+function bdf_to_nodedev {
+	echo "pci_$(echo $1 | sed 's/[:\.]/_/g')"
+}
+
+function detach_pcie_pt_devs {
+	OIFS=${IFS}
+	IFS=","
+	for bdf in ${VM_PCIE_PT_BFDS}; do
+		local dev=$(bdf_to_nodedev ${bdf})
+
+		virsh nodedev-detach ${dev}
+	done
+	IFS=${OIFS}
+}
+
+function reattach_pcie_pt_devs {
+	OIFS=${IFS}
+	IFS=","
+	for bdf in ${VM_PCIE_PT_BFDS}; do
+		local dev=$(bdf_to_nodedev ${bdf})
+
+		virsh nodedev-reattach ${dev}
+	done
+	IFS=${OIFS}
+}
