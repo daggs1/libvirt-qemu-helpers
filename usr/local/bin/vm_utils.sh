@@ -64,3 +64,32 @@ function gather_pcie_pt_bdfs {
 	IFS=${OIFS}
 	echo ${bdfs:1}
 }
+
+function create_input_events_links {
+	local inputs=
+
+	OIFS=${IFS}
+	IFS=','
+
+	for ent in ${SEAT_DEVS}; do
+		echo "${ent}" | egrep -q "^input[0-9]+$" || continue
+		inputs="${inputs}$(cat /sys/class/input/${ent}/name):$(basename /sys/class/input/${ent}/event*)\n"
+	done
+
+	IFS=${OIFS}
+
+	for input in {keyboard,mouse}; do
+		xml_input_path="$(xmllint --xpath "//domain/devices/input[@type='evdev']/source/@dev" ${VM_XML_FILE_PATH} | grep "/${input}-" | cut -f 2 -d = | sed 's/"//g')"
+		if [ -z "${xml_input_path}" ]; then
+			continue
+		fi
+
+		if [ "${STATE_PATH}" != "$(dirname ${xml_input_path})" ]; then
+			echo "${STATE_PATH} and $(dirname ${xml_input_path}) differ"
+			exit 1
+		fi
+
+		event_fd=$(echo -e "${inputs::-2}" | grep -i " ${input}:" | cut -f 2 -d :)
+		ln -s /dev/input/${event_fd} ${xml_input_path}
+	done
+}
