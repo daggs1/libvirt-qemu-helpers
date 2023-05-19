@@ -11,9 +11,14 @@ function init_base_vars {
 	local EXEC_USER=$(ps -o user= -p ${curr_pid})
 	local VM_XML_FILE_PATH=
 	local seat_devs_file_path="/tmp/seat_devs-${GST_NAME}"
+
+	if [ -f "${seat_devs_file_path}" ]; then
+		mv ${seat_devs_file_path} ${STATE_PATH}/seat_devs
+		seat_devs_file_path="${STATE_PATH}/seat_devs"
+	fi
+
 	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
 
-	rm -rf ${seat_devs_file_path} 2>/dev/null
 	local xmls_path="${CFG_PATH}/../../qemu"
 	OIFS=${IFS}
 	IFS=$'\n'
