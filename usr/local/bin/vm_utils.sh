@@ -119,3 +119,66 @@ function reattach_pcie_pt_devs {
 	done
 	IFS=${OIFS}
 }
+
+function pcie_pt_dev_has_active_gpu {
+	local ret_val=0
+	local gpus_pci_addr=
+	OIFS=${IFS}
+	IFS=","
+
+	for ent in ${SEAT_DEVS}; do
+		echo "${ent}" | egrep -q "^card[0-9]+$" || continue
+		gpus_pci_addr="${gpus_pci_addr}$(realpath /sys/class/drm/${ent}/device/ | xargs basename)\n"
+	done
+
+	for bdf in ${VM_PCIE_PT_BFDS}; do
+		class=$(cat /sys/bus/pci/devices/${bdf}/class)
+
+		if [ "${class}" != "0x030000" ]; then
+			continue
+		else
+			echo -e "${gpus_pci_addr::-2}" | egrep -q "^${bdf}$"
+
+			if [ $? -eq 0 ]; then
+				ret_val=1
+				break
+			fi
+		fi
+	done
+	IFS=${OIFS}
+
+	return ${ret_val}
+}
+
+function unbind_active_gpu {
+	pcie_pt_dev_has_active_gpu
+	if [ $? -eq 0 ]; then
+		return
+	fi
+
+	rc-config stop display-manager
+
+	for vtcon in $(find /sys/class/vtconsole -name "vtcon*" ! -type d); do
+		grep -q "frame buffer device$" ${vtcon}/name || continue
+		echo 0 > ${vtcon}/bind
+	done
+
+	# unbind efi fb
+	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind
+}
+
+function rebind_active_gpu {
+	pcie_pt_dev_has_active_gpu
+	if [ $? -eq 0 ]; then
+		return
+	fi
+
+	for vtcon in $(find /sys/class/vtconsole -name "vtcon*" ! -type d); do
+		grep -q "frame buffer device$" ${vtcon}/name || continue
+		echo 1 > ${vtcon}/bind
+	done
+
+	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
+
+	rc-config start display-manager
+}
