@@ -10,11 +10,11 @@ function init_base_vars {
 	local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
 	local EXEC_USER=$(ps -o user= -p ${curr_pid})
 	local VM_XML_FILE_PATH=
-	local seat_devs_file_path="/tmp/seat_devs-${GST_NAME}"
+	local seat_devs_tmp_file_path="/tmp/seat_devs-${GST_NAME}"
+	local seat_devs_file_path="${STATE_PATH}/seat_devs"
 
-	if [ -f "${seat_devs_file_path}" ]; then
-		mv ${seat_devs_file_path} ${STATE_PATH}/seat_devs
-		seat_devs_file_path="${STATE_PATH}/seat_devs"
+	if [ ! -f "${seat_devs_file_path}" -a -f "${seat_devs_tmp_file_path}" ]; then
+		mv ${seat_devs_tmp_file_path} ${seat_devs_file_path}
 	fi
 
 	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
@@ -156,6 +156,8 @@ function pcie_pt_dev_has_active_gpu {
 }
 
 function unbind_active_gpu {
+	local efifb_path="/sys/bus/platform/drivers/efi-framebuffer/"
+
 	pcie_pt_dev_has_active_gpu
 	if [ $? -eq 0 ]; then
 		return
@@ -168,11 +170,15 @@ function unbind_active_gpu {
 		echo 0 > ${vtcon}/bind
 	done
 
-	# unbind efi fb
-	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind
+	if [ -d "${efifb_path}" ]; then
+		# unbind efi fb
+		echo efi-framebuffer.0 > ${efifb_path}/unbind
+	fi
 }
 
 function rebind_active_gpu {
+	local efifb_path="/sys/bus/platform/drivers/efi-framebuffer/"
+
 	pcie_pt_dev_has_active_gpu
 	if [ $? -eq 0 ]; then
 		return
@@ -183,7 +189,9 @@ function rebind_active_gpu {
 		echo 1 > ${vtcon}/bind
 	done
 
-	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
+	if [ -d "${efifb_path}" ]; then
+		echo efi-framebuffer.0 > ${efifb_path}/bind
+	fi
 
 	rc-config start display-manager
 }
