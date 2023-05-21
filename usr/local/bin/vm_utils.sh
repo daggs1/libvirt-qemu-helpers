@@ -8,7 +8,7 @@ function init_base_vars {
 	local STATE_PATH="/var/lib/libvirt/helpers_state/${GST_NAME}"
 	local CFG_PATH="/etc/libvirt/hooks/qemu.d"
 	local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
-	local EXEC_USER=$(ps -o user= -p ${curr_pid})
+	local EXEC_USER=$(ps -o user= -p ${curr_pid} 2>/dev/null)
 	local VM_XML_FILE_PATH=
 	local seat_devs_tmp_file_path="/tmp/seat_devs-${GST_NAME}"
 	local seat_devs_file_path="${STATE_PATH}/seat_devs"
