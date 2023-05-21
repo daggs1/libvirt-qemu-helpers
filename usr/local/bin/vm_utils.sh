@@ -18,6 +18,7 @@ function init_base_vars {
 	fi
 
 	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
+	local cmd
 
 	if [ ! -z "${SHELL}" ]; then
 		local xmls_path="$(realpath ${CFG_PATH}/../../qemu)"
@@ -31,9 +32,10 @@ function init_base_vars {
 		done
 
 		OIFS=${OIFS}
+		cmd="cat ${VM_XML_FILE_PATH}"
 	fi
 
-	local VM_PCIE_PT_BFDS=$(export VM_PCIE_PT_BFDS; gather_pcie_pt_bdfs)
+	local VM_PCIE_PT_BFDS=$(eval ${cmd} | gather_pcie_pt_bdfs)
 	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS}; do
 		echo "${var}=$(eval echo \${${var}})"
 	done
@@ -61,10 +63,15 @@ function release_state {
 function gather_pcie_pt_bdfs {
 	local bdfs=
 	local prefix="//domain/devices/hostdev[@type='pci']/source/address"
+	local data=
+	while read line; do
+		data="${data}\n${line}"
+	done < "${1:-/dev/stdin}"
+
 	OIFS=${IFS}
 	IFS=","
 
-	for pcie in $(xmllint --xpath "${prefix}/@domain | ${prefix}/@bus | ${prefix}/@slot | ${prefix}/@function" ${VM_XML_FILE_PATH} 2>/dev/null | cut -f 2 -d = | sed 's/"//g;s/0x//g' | sed '0~4 a\,\'); do
+	for pcie in $(echo -e "${data}" | xmllint --xpath "${prefix}/@domain | ${prefix}/@bus | ${prefix}/@slot | ${prefix}/@function" - 2>/dev/null | cut -f 2 -d = | sed 's/"//g;s/0x//g' | sed '0~4 a\,\'); do
 		bdfs="${bdfs},$(echo "${pcie}" | xargs | sed 's/ /./3;s/ /:/g')"
 	done
 
