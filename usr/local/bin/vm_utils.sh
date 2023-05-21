@@ -19,17 +19,19 @@ function init_base_vars {
 
 	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
 
-	local xmls_path="${CFG_PATH}/../../qemu"
-	OIFS=${IFS}
-	IFS=$'\n'
+	if [ ! -z "${SHELL}" ]; then
+		local xmls_path="$(realpath ${CFG_PATH}/../../qemu)"
+		OIFS=${IFS}
+		IFS=$'\n'
 
-	for xml_file_path in $(find ${xmls_path} -name "*.xml" -type f); do
-		xmllint --xpath "//domain/name/text()" ${xml_file_path} 2>/dev/null | egrep -q "^${GST_NAME}$" || continue
-		VM_XML_FILE_PATH=${xml_file_path}
-		break
-	done
+		for xml_file_path in $(find ${xmls_path} -name "*.xml" -type f); do
+			xmllint --xpath "//domain/name/text()" ${xml_file_path} 2>/dev/null | egrep -q "^${GST_NAME}$" || continue
+			VM_XML_FILE_PATH=${xml_file_path}
+			break
+		done
 
-	OIFS=${OIFS}
+		OIFS=${OIFS}
+	fi
 
 	local VM_PCIE_PT_BFDS=$(export VM_PCIE_PT_BFDS; gather_pcie_pt_bdfs)
 	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS}; do
