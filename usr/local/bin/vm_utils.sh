@@ -20,7 +20,10 @@ function init_base_vars {
 	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
 	local cmd
 
-	if [ ! -z "${SHELL}" ]; then
+	if [ "${STATE}" = "init" -a "${STAGE}" = "none" ]; then
+		VM_XML_FILE_PATH=-
+		cmd="virsh --connect qemu:///system dumpxml ${GST_NAME}"
+	else
 		local xmls_path="$(realpath ${CFG_PATH}/../../qemu)"
 		OIFS=${IFS}
 		IFS=$'\n'
@@ -204,3 +207,27 @@ function rebind_active_gpu {
 
 	rc-config start display-manager
 }
+
+vm_name=$1
+case $(basename $0) in
+	start_vm)
+		for module in {tun,kvm_amd,vhost_net}; do
+			sudo modprobe ${module} || exit $?
+		done
+		sudo rc-config start libvirtd || exit $?
+		sleep 1s
+		virsh_params="--connect qemu:///system -d 4"
+
+		export SEAT_DEVS=$(loginctl seat-status | egrep "(MASTER|Keyboard|Mouse)" | egrep -v "Control" | cut -f 2 -d : | awk '{print $1}' | tr '\n' ',' | sed 's/,$//g')
+
+		export $(init_base_vars ${vm_name} init none)
+		cmd="bash"
+		virsh ${virsh_params} dumpxml ${vm_name} |
+		pcie_pt_dev_has_active_gpu
+		if [ $? -eq 1 ]; then
+			cmd="at -m now"
+		fi
+
+		echo "echo \"${SEAT_DEVS}\" > /tmp/seat_devs-${vm_name}; virsh ${virsh_params} start ${vm_name}" | ${cmd}
+	;;
+esac
