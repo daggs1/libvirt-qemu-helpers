@@ -83,7 +83,7 @@ function init_log {
 
 function prep_state {
 	mkdir -p ${STATE_PATH}
-	mount -t tmpfs -o size=4K tmpfs ${STATE_PATH}
+	mount -t tmpfs -o size=16K tmpfs ${STATE_PATH}
 
 	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
 	eval $(get_pt_usb_hubs_files ${GST_NAME} ${STATE_PATH})
@@ -98,6 +98,12 @@ function prep_state {
 }
 
 function release_state {
+	local socket_pid_file="$(xmllint --xpath "string(//domain/devices/filesystem[@accessmode='passthrough' and @type='mount']/source[@socket]/@socket)" ${VM_XML_FILE_PATH}).pid"
+
+	if [ -f "${socket_pid_file}" ]; then
+		kill -15 $(cat ${socket_pid_file})
+	fi
+
 	umount ${STATE_PATH}
 }
 
@@ -244,6 +250,35 @@ function rebind_active_gpu {
 	fi
 
 	rc-config start display-manager
+}
+
+function attach_additional_fses {
+	local prefix="//domain/memoryBacking"
+	local bs_src_type_is_memfd=0
+	local bs_acc_mode_is_shared=0
+
+	xmllint --xpath  "string(${prefix}//source/@type)" ${VM_XML_FILE_PATH} | egrep -q "^memfd$" && bs_src_type_is_memfd=1
+	xmllint --xpath  "string(${prefix}//access/@mode)" ${VM_XML_FILE_PATH} | egrep -q "^shared$" && bs_acc_mode_is_shared=1
+
+	if [ ${bs_src_type_is_memfd} = 1 -a ${bs_acc_mode_is_shared} = 1 ]; then
+		prefix="//domain/devices/filesystem[@accessmode='passthrough' and @type='mount']"
+		xmllint --xpath  "${prefix}/driver[@type='virtiofs']"  ${VM_XML_FILE_PATH} > /dev/null 2>&1
+		if [ $? -eq 0 ]; then
+			local socket_path="$(xmllint --xpath  "string(${prefix}/source[@socket]/@socket)"  ${VM_XML_FILE_PATH})"
+			if [ ! -z "${socket_path}" ]; then
+				local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
+				local user=$(ps -o user= -p ${curr_pid} 2>/dev/null)
+
+				if [ ! -z "${user}" ]; then
+					local user_home="$(eval echo ~${user})"
+					local cmd="virtiofsd --socket-path=${socket_path} --shared-dir ${user_home} --cache auto --log-level=debug"
+					nohup ${cmd} 2>&1 > /tmp/vfsd-debug.log &
+					sleep 3s
+					chown qemu: ${socket_path}
+				fi
+			fi
+		fi
+	fi
 }
 
 vm_name=$1
