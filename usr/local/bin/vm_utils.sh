@@ -1,5 +1,12 @@
 #!/bin/bash
 
+function get_seat_devs_files {
+	local GST_NAME="$1"
+	local STATE_PATH="$2"
+
+	echo "seat_devs_tmp_file_path=\"/tmp/seat_devs-${GST_NAME}\" seat_devs_file_path=\"${STATE_PATH}/seat_devs\""
+}
+
 function init_base_vars {
 	local GST_NAME="$1"
 	local STATE="$2"
@@ -10,14 +17,14 @@ function init_base_vars {
 	local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
 	local EXEC_USER=$(ps -o user= -p ${curr_pid} 2>/dev/null)
 	local VM_XML_FILE_PATH=
-	local seat_devs_tmp_file_path="/tmp/seat_devs-${GST_NAME}"
-	local seat_devs_file_path="${STATE_PATH}/seat_devs"
+	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
+	local curr_seat_devs_file_path=${seat_devs_tmp_file_path}
 
-	if [ ! -f "${seat_devs_file_path}" -a -f "${seat_devs_tmp_file_path}" ]; then
-		mv ${seat_devs_tmp_file_path} ${seat_devs_file_path}
+	if [ ! -f "${curr_seat_devs_file_path}" ]; then
+		curr_seat_devs_file_path=${seat_devs_file_path}
 	fi
 
-	local SEAT_DEVS=$(cat ${seat_devs_file_path} 2>/dev/null)
+	local SEAT_DEVS=$(cat ${curr_seat_devs_file_path} 2>/dev/null)
 	local cmd
 
 	if [ "${STATE}" = "init" -a "${STAGE}" = "none" ]; then
@@ -57,6 +64,12 @@ function init_log {
 function prep_state {
 	mkdir -p ${STATE_PATH}
 	mount -t tmpfs -o size=4K tmpfs ${STATE_PATH}
+
+	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
+
+	if [ ! -f "${seat_devs_file_path}" -a -f "${seat_devs_tmp_file_path}" ]; then
+		mv ${seat_devs_tmp_file_path} ${seat_devs_file_path}
+	fi
 }
 
 function release_state {
@@ -211,6 +224,8 @@ function rebind_active_gpu {
 vm_name=$1
 case $(basename $0) in
 	start_vm)
+		eval $(get_seat_devs_files ${vm_name} /dev/null)
+
 		for module in {tun,kvm_amd,vhost_net}; do
 			sudo modprobe ${module} || exit $?
 		done
@@ -218,16 +233,15 @@ case $(basename $0) in
 		sleep 1s
 		virsh_params="--connect qemu:///system -d 4"
 
-		export SEAT_DEVS=$(loginctl seat-status | egrep "(MASTER|Keyboard|Mouse)" | egrep -v "Control" | cut -f 2 -d : | awk '{print $1}' | tr '\n' ',' | sed 's/,$//g')
+		loginctl seat-status | egrep "(MASTER|Keyboard|Mouse)" | egrep -v "Control" | cut -f 2 -d : | awk '{print $1}' | tr '\n' ',' | sed 's/,$//g' > ${seat_devs_tmp_file_path}
 
 		export $(init_base_vars ${vm_name} init none)
 		cmd="bash"
-		virsh ${virsh_params} dumpxml ${vm_name} |
-		pcie_pt_dev_has_active_gpu
+		virsh ${virsh_params} dumpxml ${vm_name} | pcie_pt_dev_has_active_gpu
 		if [ $? -eq 1 ]; then
 			cmd="at -m now"
 		fi
 
-		echo "echo \"${SEAT_DEVS}\" > /tmp/seat_devs-${vm_name}; virsh ${virsh_params} start ${vm_name}" | ${cmd}
+		echo "virsh ${virsh_params} start ${vm_name}" | ${cmd}
 	;;
 esac
