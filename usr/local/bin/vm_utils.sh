@@ -262,19 +262,22 @@ function attach_additional_fses {
 
 	if [ ${bs_src_type_is_memfd} = 1 -a ${bs_acc_mode_is_shared} = 1 ]; then
 		prefix="//domain/devices/filesystem[@accessmode='passthrough' and @type='mount']"
-		xmllint --xpath  "${prefix}/driver[@type='virtiofs']"  ${VM_XML_FILE_PATH} > /dev/null 2>&1
+		xmllint --xpath "${prefix}/driver[@type='virtiofs']" ${VM_XML_FILE_PATH} > /dev/null 2>&1
 		if [ $? -eq 0 ]; then
 			local socket_path="$(xmllint --xpath  "string(${prefix}/source[@socket]/@socket)"  ${VM_XML_FILE_PATH})"
 			if [ ! -z "${socket_path}" ]; then
 				local curr_pid=$(ps aux | grep " start ${GST_NAME}" | grep -v grep | awk '{print $2}')
 				local user=$(ps -o user= -p ${curr_pid} 2>/dev/null)
 
-				if [ ! -z "${user}" ]; then
-					local user_home="$(eval echo ~${user})"
-					local cmd="virtiofsd --socket-path=${socket_path} --shared-dir ${user_home} --cache auto --log-level=debug"
-					nohup ${cmd} > ${LOGS_PATH}/${GST_NAME}-vfiofs-$(basename ${socket_path} | rev | cut -f 2- -d '.' | rev).log 2>&1 &
-					sleep 3s
-					chown qemu: ${socket_path}
+				xmllint --xpath "//domain/cpu/numa/cell" ${VM_XML_FILE_PATH} > /dev/null 2>&1
+				if [ $? -eq 0 ]; then
+					if [ ! -z "${user}" ]; then
+						local user_home="$(eval echo ~${user})"
+						local cmd="virtiofsd --socket-path=${socket_path} --shared-dir ${user_home} --cache auto --log-level=debug"
+						nohup ${cmd} > ${LOGS_PATH}/${GST_NAME}-vfiofs-$(basename ${socket_path} | rev | cut -f 2- -d '.' | rev).log 2>&1 &
+						sleep 3s
+						chown qemu: ${socket_path}
+					fi
 				fi
 			fi
 		fi
