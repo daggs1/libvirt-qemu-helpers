@@ -272,7 +272,7 @@ function attach_additional_fses {
 				if [ ! -z "${user}" ]; then
 					local user_home="$(eval echo ~${user})"
 					local cmd="virtiofsd --socket-path=${socket_path} --shared-dir ${user_home} --cache auto --log-level=debug"
-					nohup ${cmd} 2>&1 > /tmp/vfsd-debug.log &
+					nohup ${cmd} > ${LOGS_PATH}/${GST_NAME}-vfiofs-$(basename ${socket_path} | rev | cut -f 2- -d '.' | rev).log 2>&1 &
 					sleep 3s
 					chown qemu: ${socket_path}
 				fi
