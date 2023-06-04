@@ -1,5 +1,12 @@
 #!/bin/bash
 
+function get_pre_boot_custom_cmd_files {
+	local GST_NAME="$1"
+	local STATE_PATH="$2"
+
+	echo "pre_boot_custom_cmd_tmp_file_path=\"/tmp/pre_boot_custom_cmd-${GST_NAME}\" pre_boot_custom_cmd_file_path=\"${STATE_PATH}/pre_boot_custom_cmd\""
+}
+
 function get_pt_usb_hubs_files {
 	local GST_NAME="$1"
 	local STATE_PATH="$2"
@@ -26,9 +33,11 @@ function init_base_vars {
 	local VM_XML_FILE_PATH=
 	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
 	eval $(get_pt_usb_hubs_files ${GST_NAME} ${STATE_PATH})
+	eval $(get_pre_boot_custom_cmd_files ${GST_NAME} ${STATE_PATH})
 
 	local curr_seat_devs_file_path=${seat_devs_tmp_file_path}
 	local curr_pt_usb_hubs_file_path=${pt_usb_hubs_tmp_file_path}
+	local curr_pre_boot_custom_cmd_file_path=${pre_boot_custom_cmd_tmp_file_path}
 
 	if [ ! -f "${curr_seat_devs_file_path}" ]; then
 		curr_seat_devs_file_path=${seat_devs_file_path}
@@ -38,8 +47,13 @@ function init_base_vars {
 		curr_pt_usb_hubs_file_path=${pt_usb_hubs_file_path}
 	fi
 
+	if [ ! -f "${curr_pre_boot_custom_cmd_file_path}" ]; then
+		curr_pre_boot_custom_cmd_file_path=${pre_boot_custom_cmd_file_path}
+	fi
+
 	local SEAT_DEVS=$(cat ${curr_seat_devs_file_path} 2>/dev/null)
 	local USB_PT_DATA=$(cat ${curr_pt_usb_hubs_file_path} 2>/dev/null)
+	local PRE_BOOT_CUSTOM_CMD=$(cat ${curr_pre_boot_custom_cmd_file_path} 2>/dev/null)
 	local VM_PCIE_PT_BFDS=
 
 	if [ "${STATE}" != "running" -a "${STAGE}" != "usb_pre_hotplug_scan" ]; then
@@ -66,7 +80,7 @@ function init_base_vars {
 	fi
 
 	local VM_PCIE_PT_BFDS=$(eval ${cmd} | gather_pcie_pt_bdfs)
-	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS,USB_PT_DATA}; do
+	for var in {GST_NAME,STATE,STAGE,EXEC_USER,CFG_PATH,STATE_PATH,LOGS_PATH,VM_XML_FILE_PATH,VM_PCIE_PT_BFDS,SEAT_DEVS,USB_PT_DATA,PRE_BOOT_CUSTOM_CMD}; do
 		echo "${var}=$(eval echo \${${var}})"
 	done
 }
@@ -87,6 +101,7 @@ function prep_state {
 
 	eval $(get_seat_devs_files ${GST_NAME} ${STATE_PATH})
 	eval $(get_pt_usb_hubs_files ${GST_NAME} ${STATE_PATH})
+	eval $(get_pre_boot_custom_cmd_files ${GST_NAME} ${STATE_PATH})
 
 	if [ ! -f "${seat_devs_file_path}" -a -f "${seat_devs_tmp_file_path}" ]; then
 		mv ${seat_devs_tmp_file_path} ${seat_devs_file_path}
@@ -94,6 +109,10 @@ function prep_state {
 
 	if [ ! -f "${pt_usb_hubs_file_path}" -a -f "${pt_usb_hubs_tmp_file_path}" ]; then
 		mv ${pt_usb_hubs_tmp_file_path} ${pt_usb_hubs_file_path}
+	fi
+
+	if [ ! -f "${pre_boot_custom_cmd_file_path}" -a -f "${pre_boot_custom_cmd_tmp_file_path}" ]; then
+		mv ${pre_boot_custom_cmd_tmp_file_path} ${pre_boot_custom_cmd_file_path}
 	fi
 }
 
@@ -284,11 +303,18 @@ function attach_additional_fses {
 	fi
 }
 
+function run_pre_boot_custom_cmd {
+	if [ ! -z "${PRE_BOOT_CUSTOM_CMD}" ]; then
+		${PRE_BOOT_CUSTOM_CMD} || exit $?
+	fi
+}
+
 vm_name=$1
 case $(basename $0) in
 	start_vm)
 		eval $(get_seat_devs_files ${vm_name} /dev/null)
 		eval $(get_pt_usb_hubs_files ${vm_name} /dev/null)
+		eval $(get_pre_boot_custom_cmd_files ${vm_name} /dev/null)
 
 		for module in {tun,kvm_amd,vhost_net}; do
 			sudo modprobe ${module} || exit $?
@@ -299,6 +325,7 @@ case $(basename $0) in
 
 		loginctl seat-status | egrep "(MASTER|Keyboard|Mouse)" | egrep -v "Control" | cut -f 2 -d : | awk '{print $1}' | tr '\n' ',' | sed 's/,$//g' > ${seat_devs_tmp_file_path}
 		echo "${PT_USB_HUBS}" > ${pt_usb_hubs_tmp_file_path}
+		echo "${PRE_BOOT_CUSTOM_CMD}" > ${pre_boot_custom_cmd_tmp_file_path}
 
 		export $(init_base_vars ${vm_name} init none)
 		cmd="bash"
